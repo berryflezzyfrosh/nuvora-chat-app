@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NUVORA - Global Chat App</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Authentication Screen -->
+    <div id="authScreen" class="auth-screen">
+        <div class="auth-container">
+            <div class="auth-header">
+                <svg class="auth-logo" alt="NUVORA" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:red"/>
+                            <stop offset="100%" style="stop-color:deeppink"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M60 10 A50 50 0 1 1 59.99 10.01 Z" fill="url(#grad)"/>
+                    <path d="M35 35 Q30 30 35 25 L75 25 Q80 30 80 35 L80 60 Q75 65 70 65 L45 65 L35 75 L40 65 Q30 65 30 60 L30 40 Q30 35 35 35 Z" fill="white"/>
+                    <path d="M70 42 Q68 40 65 40 Q60 40 57 43 Q54 46 54 50 Q54 54 57 57 Q60 60 65 60 Q68 60 70 58 L70 55 Q68 57 65 57 Q62 57 60 54 Q58 51 58 50 Q58 49 60 46 Q62 43 65 43 Q68 43 70 45 Z" fill="url(#grad)"/>
+                </svg>
+                <h1>NUVORA</h1>
+                <p>Connect with people worldwide</p>
+            </div>
+
+            <!-- Login Form -->
+            <div id="loginForm" class="auth-form">
+                <h2>Welcome Back</h2>
+                <form id="loginFormElement">
+                    <div class="input-group">
+                        <input type="tel" id="loginPhone" placeholder="Phone Number" required>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="loginPassword" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="auth-btn">Login</button>
+                </form>
+                <p class="auth-switch">Don't have an account? <span onclick="showRegister()">Sign Up</span></p>
+            </div>
+
+            <!-- Register Form -->
+            <div id="registerForm" class="auth-form" style="display: none;">
+                <h2>Create Account</h2>
+                <form id="registerFormElement">
+                    <div class="input-group">
+                        <input type="text" id="registerName" placeholder="Full Name" required>
+                    </div>
+                    <div class="input-group">
+                        <input type="tel" id="registerPhone" placeholder="Phone Number" required>
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="registerCountry" placeholder="Country" required>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="registerPassword" placeholder="Password" required>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="registerConfirmPassword" placeholder="Confirm Password" required>
+                    </div>
+                    <button type="submit" class="auth-btn">Create Account</button>
+                </form>
+                <p class="auth-switch">Already have an account? <span onclick="showLogin()">Sign In</span></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat Application -->
+    <div id="chatApp" class="chat-app" style="display: none;">
+        <div class="app-container">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <div class="user-profile">
+                        <div class="profile-pic-container">
+                            <img id="userProfilePic" src="" alt="Profile" class="profile-pic">
+                            <input type="file" id="profilePicInput" accept="image/*" style="display: none;">
+                            <div class="profile-pic-overlay" onclick="changeProfilePic()">📷</div>
+                        </div>
+                        <div class="user-info">
+                            <h3 id="currentUserName">User</h3>
+                            <p id="currentUserCountry">Country</p>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="action-btn" onclick="showCreateGroup()">👥</button>
+                        <button class="action-btn" onclick="logout()">🚪</button>
+                    </div>
+                </div>
+
+                <div class="search-container">
+                    <input type="text" id="searchInput" placeholder="Search users or groups..." class="search-input">
+                </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="showTab('users')">Users</button>
+                    <button class="tab-btn" onclick="showTab('groups')">Groups</button>
+                    <button class="tab-btn" onclick="showTab('chats')">Chats</button>
+                </div>
+
+                <div id="usersTab" class="tab-content">
+                    <div id="usersList" class="users-list"></div>
+                </div>
+
+                <div id="groupsTab" class="tab-content" style="display: none;">
+                    <div class="create-group-btn" onclick="showCreateGroup()">
+                        <span>➕ Create New Group</span>
+                    </div>
+                    <div id="groupsList" class="groups-list"></div>
+                </div>
+
+                <div id="chatsTab" class="tab-content" style="display: none;">
+                    <div id="chatsList" class="chats-list"></div>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="chat-area">
+                <div id="welcomeScreen" class="welcome-screen">
+                    <div class="welcome-content">
+                        <h2>Welcome to NUVORA</h2>
+                        <p>Select a user or group to start chatting</p>
+                        <div class="welcome-features">
+                            <div class="feature">🌍 Chat with people worldwide</div>
+                            <div class="feature">👥 Create and join groups</div>
+                            <div class="feature">🔒 Secure messaging</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="chatScreen" class="chat-screen" style="display: none;">
+                    <div class="chat-header">
+                        <div class="chat-info">
+                            <img id="chatProfilePic" src="" alt="Profile" class="chat-profile-pic">
+                            <div class="chat-details">
+                                <h3 id="chatName">Chat Name</h3>
+                                <p id="chatStatus">Status</p>
+                            </div>
+                        </div>
+                        <div class="chat-actions">
+                            <button class="action-btn" onclick="showChatInfo()">ℹ️</button>
+                        </div>
+                    </div>
+
+                    <div id="messagesContainer" class="messages-container"></div>
+
+                    <div class="message-input-area">
+                        <div class="input-container">
+                            <button class="input-btn" onclick="toggleEmojiPicker()">😊</button>
+                            <input type="text" id="messageInput" placeholder="Type a message..." class="message-input">
+                            <button class="send-btn" onclick="sendMessage()">➤</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Group Modal -->
+    <div id="createGroupModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Group</h3>
+                <button class="close-btn" onclick="closeCreateGroup()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <input type="text" id="groupName" placeholder="Group Name" required>
+                </div>
+                <div class="input-group">
+                    <textarea id="groupDescription" placeholder="Group Description (optional)"></textarea>
+                </div>
+                <div class="members-section">
+                    <h4>Add Members</h4>
+                    <div id="availableUsers" class="available-users"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateGroup()">Cancel</button>
+                <button class="btn btn-primary" onclick="createGroup()">Create Group</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Emoji Picker -->
+    <div id="emojiPicker" class="emoji-picker" style="display: none;">
+        <div class="emoji-grid"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
