@@ -1,4 +1,4 @@
-            * {
+* {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -410,10 +410,28 @@ body {
     justify-content: space-between;
 }
 
+.back-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: red;
+    margin-right: 16px;
+    padding: 8px;
+    border-radius: 50%;
+    transition: background 0.3s ease;
+    display: none;
+}
+
+.back-btn:hover {
+    background: #f0f2f5;
+}
+
 .chat-info {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex: 1;
 }
 
 .chat-profile-pic {
@@ -650,12 +668,12 @@ body {
 }
 
 .btn-primary {
-    background: #25D366;
+    background: linear-gradient(135deg, red 0%, deeppink 100%);
     color: white;
 }
 
 .btn-primary:hover {
-    background: #22c55e;
+    background: linear-gradient(135deg, red 0%, deeppink 100%);
 }
 
 .btn-secondary {
@@ -689,28 +707,34 @@ body {
     overflow-y: auto;
 }
 
-.emoji {
+.emoji-btn {
     cursor: pointer;
     font-size: 20px;
     padding: 8px;
     border-radius: 8px;
     text-align: center;
     transition: background 0.3s ease;
+    border: none;
+    background: none;
 }
 
-.emoji:hover {
+.emoji-btn:hover {
     background: #f0f2f5;
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
     .app-container {
-        flex-direction: column;
+        position: relative;
     }
     
     .sidebar {
         width: 100%;
         height: 100vh;
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 10;
     }
     
     .chat-area {
@@ -719,12 +743,37 @@ body {
         left: 0;
         width: 100%;
         height: 100vh;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
+        z-index: 20;
+        display: none;
     }
     
-    .chat-area.active {
-        transform: translateX(0);
+    .back-btn {
+        display: block !important;
+    }
+    
+    .auth-container {
+        padding: 30px 20px;
+    }
+    
+    .auth-header h1 {
+        font-size: 28px;
+    }
+    
+    .welcome-content h2 {
+        font-size: 24px;
+    }
+    
+    .welcome-content p {
+        font-size: 16px;
+    }
+    
+    .sidebar {
+        width: 100%;
+    }
+    
+    .modal-content {
+        width: 95%;
+        margin: 20px;
     }
 }
 

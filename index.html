@@ -72,7 +72,7 @@
     <div id="chatApp" class="chat-app" style="display: none;">
         <div class="app-container">
             <!-- Sidebar -->
-            <div class="sidebar">
+            <div id="sidebar" class="sidebar">
                 <div class="sidebar-header">
                     <div class="user-profile">
                         <div class="profile-pic-container">
@@ -118,7 +118,7 @@
             </div>
 
             <!-- Chat Area -->
-            <div class="chat-area">
+            <div id="chatArea" class="chat-area">
                 <div id="welcomeScreen" class="welcome-screen">
                     <div class="welcome-content">
                         <h2>Welcome to NUVORA</h2>
@@ -133,6 +133,7 @@
 
                 <div id="chatScreen" class="chat-screen" style="display: none;">
                     <div class="chat-header">
+                        <button id="backBtn" class="back-btn" onclick="closeChatScreen()">←</button>
                         <div class="chat-info">
                             <img id="chatProfilePic" src="" alt="Profile" class="chat-profile-pic">
                             <div class="chat-details">

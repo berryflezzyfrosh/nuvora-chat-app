@@ -5,6 +5,7 @@ let users = [];
 let groups = [];
 let chats = [];
 let messages = {};
+let globalUsers = []; // Shared across all devices
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -22,6 +23,9 @@ function initializeApp() {
     } else {
         showAuthScreen();
     }
+    
+    // Start real-time sync
+    startRealTimeSync();
 }
 
 function loadStoredData() {
@@ -31,14 +35,14 @@ function loadStoredData() {
     const storedGroups = localStorage.getItem('nuvoraGroups');
     const storedChats = localStorage.getItem('nuvoraChats');
     const storedMessages = localStorage.getItem('nuvoraMessages');
+    const storedGlobalUsers = localStorage.getItem('nuvoraGlobalUsers');
     
     if (storedUser) currentUser = JSON.parse(storedUser);
     if (storedUsers) users = JSON.parse(storedUsers);
     if (storedGroups) groups = JSON.parse(storedGroups);
     if (storedChats) chats = JSON.parse(storedChats);
     if (storedMessages) messages = JSON.parse(storedMessages);
-    
-    
+    if (storedGlobalUsers) globalUsers = JSON.parse(storedGlobalUsers);
 }
 
 function saveData() {
@@ -47,6 +51,73 @@ function saveData() {
     localStorage.setItem('nuvoraGroups', JSON.stringify(groups));
     localStorage.setItem('nuvoraChats', JSON.stringify(chats));
     localStorage.setItem('nuvoraMessages', JSON.stringify(messages));
+    localStorage.setItem('nuvoraGlobalUsers', JSON.stringify(globalUsers));
+    
+    // Broadcast changes to other tabs/devices
+    broadcastUpdate();
+}
+
+function broadcastUpdate() {
+    // Use localStorage events to sync between tabs
+    localStorage.setItem('nuvoraSync', JSON.stringify({
+        timestamp: Date.now(),
+        users: globalUsers,
+        messages: messages,
+        chats: chats
+    }));
+}
+
+function startRealTimeSync() {
+    // Listen for storage changes (cross-tab communication)
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'nuvoraSync') {
+            const syncData = JSON.parse(e.newValue);
+            if (syncData) {
+                globalUsers = syncData.users || [];
+                messages = syncData.messages || {};
+                chats = syncData.chats || [];
+                
+                // Update UI if needed
+                if (currentUser) {
+                    loadUsers();
+                    loadChats();
+                    if (currentChat) {
+                        loadMessages();
+                    }
+                }
+            }
+        }
+    });
+    
+    // Periodic sync every 5 seconds
+    setInterval(() => {
+        if (currentUser) {
+            syncWithGlobalData();
+        }
+    }, 5000);
+}
+
+function syncWithGlobalData() {
+    // Merge local users with global users
+    globalUsers.forEach(globalUser => {
+        const existingIndex = users.findIndex(u => u.phone === globalUser.phone);
+        if (existingIndex === -1) {
+            users.push(globalUser);
+        } else {
+            // Update existing user data
+            users[existingIndex] = { ...users[existingIndex], ...globalUser };
+        }
+    });
+    
+    // Update current user in global list
+    const currentUserIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+    if (currentUserIndex === -1) {
+        globalUsers.push(currentUser);
+    } else {
+        globalUsers[currentUserIndex] = currentUser;
+    }
+    
+    saveData();
 }
 
 function setupEventListeners() {
@@ -79,6 +150,7 @@ function showChatApp() {
     
     if (currentUser) {
         updateUserProfile();
+        syncWithGlobalData();
         loadUsers();
         loadGroups();
         loadChats();
@@ -101,13 +173,27 @@ function handleLogin(e) {
     const phone = document.getElementById('loginPhone').value;
     const password = document.getElementById('loginPassword').value;
     
-    // Find user in stored users
-    const user = users.find(u => u.phone === phone && u.password === password);
+    // Check in global users first
+    let user = globalUsers.find(u => u.phone === phone && u.password === password);
+    
+    // If not found in global, check local
+    if (!user) {
+        user = users.find(u => u.phone === phone && u.password === password);
+    }
     
     if (user) {
-        currentUser = user;
+        currentUser = { ...user };
         currentUser.online = true;
         currentUser.lastSeen = new Date().toISOString();
+        
+        // Add to local users if not exists
+        const localUserIndex = users.findIndex(u => u.phone === phone);
+        if (localUserIndex === -1) {
+            users.push(currentUser);
+        } else {
+            users[localUserIndex] = currentUser;
+        }
+        
         saveData();
         showChatApp();
     } else {
@@ -129,7 +215,13 @@ function handleRegister(e) {
         return;
     }
     
-    // Check if user already exists
+    // Check if user already exists in global users
+    if (globalUsers.find(u => u.phone === phone)) {
+        alert('User with this phone number already exists');
+        return;
+    }
+    
+    // Check if user already exists in local users
     if (users.find(u => u.phone === phone)) {
         alert('User with this phone number already exists');
         return;
@@ -137,7 +229,7 @@ function handleRegister(e) {
     
     // Create new user
     const newUser = {
-        id: Date.now().toString(),
+        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
         name,
         phone,
         country,
@@ -148,6 +240,7 @@ function handleRegister(e) {
     };
     
     users.push(newUser);
+    globalUsers.push(newUser);
     currentUser = newUser;
     saveData();
     showChatApp();
@@ -177,6 +270,13 @@ function handleProfilePicChange(e) {
             currentUser.profilePic = e.target.result;
             document.getElementById('userProfilePic').src = currentUser.profilePic;
             document.getElementById('userProfilePic').style.display = 'block';
+            
+            // Update in global users
+            const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+            if (globalIndex !== -1) {
+                globalUsers[globalIndex].profilePic = currentUser.profilePic;
+            }
+            
             saveData();
         };
         reader.readAsDataURL(file);
@@ -208,7 +308,13 @@ function loadUsers() {
     const usersList = document.getElementById('usersList');
     usersList.innerHTML = '';
     
-    users.filter(user => user.id !== currentUser.id).forEach(user => {
+    // Combine local and global users, remove duplicates
+    const allUsers = [...users, ...globalUsers];
+    const uniqueUsers = allUsers.filter((user, index, self) => 
+        index === self.findIndex(u => u.phone === user.phone) && user.id !== currentUser.id
+    );
+    
+    uniqueUsers.forEach(user => {
         const userElement = createUserElement(user);
         usersList.appendChild(userElement);
     });
@@ -284,7 +390,7 @@ function createChatElement(chat) {
     chatDiv.onclick = () => openExistingChat(chat);
     
     const otherParticipant = chat.type === 'user' ? 
-        users.find(u => u.id === chat.participants.find(p => p !== currentUser.id)) :
+        [...users, ...globalUsers].find(u => u.id === chat.participants.find(p => p !== currentUser.id)) :
         groups.find(g => g.id === chat.groupId);
     
     const name = otherParticipant ? otherParticipant.name : 'Unknown';
@@ -342,7 +448,7 @@ function startChat(target, type) {
 
 function openExistingChat(chat) {
     if (chat.type === 'user') {
-        const otherUser = users.find(u => u.id === chat.participants.find(p => p !== currentUser.id));
+        const otherUser = [...users, ...globalUsers].find(u => u.id === chat.participants.find(p => p !== currentUser.id));
         if (otherUser) {
             currentChat = {
                 ...chat,
@@ -367,6 +473,12 @@ function openExistingChat(chat) {
 }
 
 function openChat() {
+    // Hide sidebar on mobile
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').style.display = 'none';
+        document.getElementById('chatArea').style.display = 'flex';
+    }
+    
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('chatScreen').style.display = 'flex';
     
@@ -383,12 +495,18 @@ function openChat() {
     
     // Load messages
     loadMessages();
+}
+
+function closeChatScreen() {
+    // Show sidebar and hide chat on mobile
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').style.display = 'flex';
+        document.getElementById('chatArea').style.display = 'none';
+    }
     
-    // Mark items as active
-    document.querySelectorAll('.user-item, .group-item, .chat-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    event.target.closest('.user-item, .group-item, .chat-item')?.classList.add('active');
+    document.getElementById('chatScreen').style.display = 'none';
+    document.getElementById('welcomeScreen').style.display = 'flex';
+    currentChat = null;
 }
 
 function loadMessages() {
@@ -410,7 +528,7 @@ function createMessageElement(message) {
     messageDiv.className = `message ${message.senderId === currentUser.id ? 'sent' : 'received'}`;
     
     const senderName = message.senderId === currentUser.id ? 'You' : 
-        (users.find(u => u.id === message.senderId)?.name || 'Unknown');
+        ([...users, ...globalUsers].find(u => u.id === message.senderId)?.name || 'Unknown');
     
     messageDiv.innerHTML = `
         <div class="message-bubble">
@@ -431,7 +549,7 @@ function sendMessage() {
     if (!content || !currentChat) return;
     
     const message = {
-        id: Date.now().toString(),
+        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
         senderId: currentUser.id,
         content: content,
         timestamp: new Date().toISOString()
@@ -450,7 +568,7 @@ function sendMessage() {
         chats[chatIndex].lastMessageTime = message.timestamp;
     }
     
-    // Save data
+    // Save data and broadcast
     saveData();
     
     // Update UI
@@ -460,11 +578,6 @@ function sendMessage() {
     
     // Clear input
     input.value = '';
-    
-    // Simulate response for demo
-    if (currentChat.type === 'user') {
-        setTimeout(() => simulateResponse(), 1000 + Math.random() * 2000);
-    }
 }
 
 function showCreateGroup() {
@@ -482,7 +595,12 @@ function loadAvailableUsers() {
     const container = document.getElementById('availableUsers');
     container.innerHTML = '';
     
-    users.filter(user => user.id !== currentUser.id).forEach(user => {
+    const allUsers = [...users, ...globalUsers];
+    const uniqueUsers = allUsers.filter((user, index, self) => 
+        index === self.findIndex(u => u.phone === user.phone) && user.id !== currentUser.id
+    );
+    
+    uniqueUsers.forEach(user => {
         const userDiv = document.createElement('div');
         userDiv.className = 'user-checkbox';
         
@@ -514,7 +632,7 @@ function createGroup() {
     }
     
     const group = {
-        id: Date.now().toString(),
+        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
         name: name,
         description: description,
         members: [currentUser.id, ...selectedUsers],
@@ -552,12 +670,7 @@ function handleSearch(e) {
     if (activeTab === 'users') {
         document.querySelectorAll('.user-item').forEach(item => {
             const name = item.querySelector('.user-name').textContent.toLowerCase();
-           
-           
-           
-           
-           
-            elector('.user-country').textContent.toLowerCase();
+            const country = item.querySelector('.user-country').textContent.toLowerCase();
             item.style.display = (name.includes(query) || country.includes(query)) ? 'block' : 'none';
         });
     } else if (activeTab === 'groups') {
@@ -575,9 +688,19 @@ function handleSearch(e) {
 
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
-        currentUser.online = false;
-        currentUser.lastSeen = new Date().toISOString();
-        saveData();
+        if (currentUser) {
+            currentUser.online = false;
+            currentUser.lastSeen = new Date().toISOString();
+            
+            // Update in global users
+            const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+            if (globalIndex !== -1) {
+                globalUsers[globalIndex].online = false;
+                globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
+            }
+            
+            saveData();
+        }
         
         currentUser = null;
         currentChat = null;
@@ -633,10 +756,7 @@ function populateEmojis() {
         '👎', '👊', '✊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝',
         '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶', '👂',
         '🦻', '👃', '🧠', '🫀', '🫁', '🦷', '🦴', '👀', '👁️', '👅',
-        '👄', '💋', '🩸', '👶', '🧒', '👦', '👧', '🧑', '👱', '👨',
-        '🧔', '👩', '🧓', '👴', '👵', '🙍', '🙎', '🙅', '🙆', '💁',
-        '🙋', '🧏', '🙇', '🤦', '🤷', '👮', '🕵️', '💂', '🥷', '👷',
-        '🤴', '👸', '👳', '👲', '🧕', '🤵', '👰', '🤰', '🤱', '👼'
+        '👄', '💋', '🩸'
     ];
     
     emojis.forEach(emoji => {
@@ -697,39 +817,42 @@ document.addEventListener('click', function(e) {
     }
 });
 
+// Handle window resize for responsive design
+window.addEventListener('resize', function() {
+    if (window.innerWidth > 768) {
+        document.getElementById('sidebar').style.display = 'flex';
+        document.getElementById('chatArea').style.display = 'flex';
+    }
+});
+
 // Update online status periodically
 setInterval(() => {
     if (currentUser) {
         currentUser.lastSeen = new Date().toISOString();
+        
+        // Update in global users
+        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+        if (globalIndex !== -1) {
+            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
+        }
+        
         saveData();
     }
 }, 30000); // Update every 30 seconds
-
-// Simulate other users going online/offline
-setInterval(() => {
-    users.forEach(user => {
-        if (user.id !== currentUser?.id) {
-            // Random chance to change online status
-            if (Math.random() < 0.1) {
-                user.online = !user.online;
-                user.lastSeen = new Date().toISOString();
-            }
-        }
-    });
-    saveData();
-    
-    // Refresh current tab if users tab is active
-    const activeTab = document.querySelector('.tab-btn.active');
-    if (activeTab && activeTab.textContent.toLowerCase() === 'users') {
-        loadUsers();
-    }
-}, 10000); // Check every 10 seconds
 
 // Handle window focus/blur for online status
 window.addEventListener('focus', () => {
     if (currentUser) {
         currentUser.online = true;
         currentUser.lastSeen = new Date().toISOString();
+        
+        // Update in global users
+        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+        if (globalIndex !== -1) {
+            globalUsers[globalIndex].online = true;
+            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
+        }
+        
         saveData();
     }
 });
@@ -738,6 +861,14 @@ window.addEventListener('blur', () => {
     if (currentUser) {
         currentUser.online = false;
         currentUser.lastSeen = new Date().toISOString();
+        
+        // Update in global users
+        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+        if (globalIndex !== -1) {
+            globalUsers[globalIndex].online = false;
+            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
+        }
+        
         saveData();
     }
 });
@@ -747,100 +878,14 @@ window.addEventListener('beforeunload', () => {
     if (currentUser) {
         currentUser.online = false;
         currentUser.lastSeen = new Date().toISOString();
+        
+        // Update in global users
+        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
+        if (globalIndex !== -1) {
+            globalUsers[globalIndex].online = false;
+            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
+        }
+        
         saveData();
     }
 });
-
-// Auto-resize message input
-document.getElementById('messageInput').addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-});
-
-// Handle file uploads (for future implementation)
-function handleFileUpload() {
-    // This function can be expanded to handle file uploads
-    // For now, it's just a placeholder
-    console.log('File upload functionality to be implemented');
-}
-
-// Notification system (basic implementation)
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.textContent = message;
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto remove after 3 seconds
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-    }, 3000);
-}
-
-// Initialize notification styles
-const notificationStyles = `
-    .notification {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 8px;
-        color: white;
-        font-weight: 500;
-        z-index: 10000;
-        animation: slideIn 0.3s ease-out;
-    }
-    
-    .notification.info {
-        background-color: #3b82f6;
-    }
-    
-    .notification.success {
-        background-color: #10b981;
-    }
-    
-    .notification.error {
-        background-color: #ef4444;
-    }
-    
-    .notification.warning {
-        background-color: #f59e0b;
-    }
-    
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-`;
-
-// Add notification styles to head
-const styleSheet = document.createElement('style');
-styleSheet.textContent = notificationStyles;
-document.head.appendChild(styleSheet);
-
-// Export functions for potential module use
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        initializeApp,
-        showNotification,
-        formatTime
-    };
-}
-
-
-            
-            
-            
-            
-            
