@@ -1,3 +1,19 @@
+ // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyC7bFhndsJ_ax6U466E4xkv0SbXCdp1IGQ",
+    authDomain: "nuvora-chat-app.firebaseapp.com",
+    projectId: "nuvora-chat-app",
+    storageBucket: "nuvora-chat-app.firebasestorage.app",
+    messagingSenderId: "764236230983",
+    appId: "1:764236230983:web:d3dcc8f0b53e8c9ad59c62",
+    measurementId: "G-VNYG5C510E"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+
 // Global variables
 let currentUser = null;
 let currentChat = null;
@@ -5,7 +21,8 @@ let users = [];
 let groups = [];
 let chats = [];
 let messages = {};
-let globalUsers = []; // Shared across all devices
+let userListeners = [];
+let messageListeners = [];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -13,111 +30,88 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
-    loadStoredData();
     setupEventListeners();
     populateEmojis();
     
     // Check if user is logged in
-    if (currentUser) {
+    const storedUser = localStorage.getItem('nuvoraCurrentUser');
+    if (storedUser) {
+        currentUser = JSON.parse(storedUser);
         showChatApp();
+        setupRealTimeListeners();
     } else {
         showAuthScreen();
     }
-    
-    // Start real-time sync
-    startRealTimeSync();
 }
 
-function loadStoredData() {
-    // Load from localStorage (simulating persistent storage)
-    const storedUser = localStorage.getItem('nuvoraCurrentUser');
-    const storedUsers = localStorage.getItem('nuvoraUsers');
-    const storedGroups = localStorage.getItem('nuvoraGroups');
-    const storedChats = localStorage.getItem('nuvoraChats');
-    const storedMessages = localStorage.getItem('nuvoraMessages');
-    const storedGlobalUsers = localStorage.getItem('nuvoraGlobalUsers');
-    
-    if (storedUser) currentUser = JSON.parse(storedUser);
-    if (storedUsers) users = JSON.parse(storedUsers);
-    if (storedGroups) groups = JSON.parse(storedGroups);
-    if (storedChats) chats = JSON.parse(storedChats);
-    if (storedMessages) messages = JSON.parse(storedMessages);
-    if (storedGlobalUsers) globalUsers = JSON.parse(storedGlobalUsers);
+function showLoadingIndicator(show = true) {
+    document.getElementById('loadingIndicator').style.display = show ? 'flex' : 'none';
 }
 
-function saveData() {
-    localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
-    localStorage.setItem('nuvoraUsers', JSON.stringify(users));
-    localStorage.setItem('nuvoraGroups', JSON.stringify(groups));
-    localStorage.setItem('nuvoraChats', JSON.stringify(chats));
-    localStorage.setItem('nuvoraMessages', JSON.stringify(messages));
-    localStorage.setItem('nuvoraGlobalUsers', JSON.stringify(globalUsers));
-    
-    // Broadcast changes to other tabs/devices
-    broadcastUpdate();
-}
+function setupRealTimeListeners() {
+    // Listen for all users
+    database.ref('users').on('value', (snapshot) => {
+        users = [];
+        const usersData = snapshot.val();
+        if (usersData) {
+            Object.keys(usersData).forEach(key => {
+                users.push({ ...usersData[key], firebaseKey: key });
+            });
+        }
+        loadUsers();
+    });
 
-function broadcastUpdate() {
-    // Use localStorage events to sync between tabs
-    localStorage.setItem('nuvoraSync', JSON.stringify({
-        timestamp: Date.now(),
-        users: globalUsers,
-        messages: messages,
-        chats: chats
-    }));
-}
-
-function startRealTimeSync() {
-    // Listen for storage changes (cross-tab communication)
-    window.addEventListener('storage', function(e) {
-        if (e.key === 'nuvoraSync') {
-            const syncData = JSON.parse(e.newValue);
-            if (syncData) {
-                globalUsers = syncData.users || [];
-                messages = syncData.messages || {};
-                chats = syncData.chats || [];
-                
-                // Update UI if needed
-                if (currentUser) {
-                    loadUsers();
-                    loadChats();
-                    if (currentChat) {
-                        loadMessages();
+    // Listen for user's chats
+    if (currentUser) {
+        database.ref('chats').orderByChild('participants').on('value', (snapshot) => {
+            chats = [];
+            const chatsData = snapshot.val();
+            if (chatsData) {
+                Object.keys(chatsData).forEach(key => {
+                    const chat = chatsData[key];
+                    if (chat.participants && chat.participants.includes(currentUser.id)) {
+                        chats.push({ ...chat, firebaseKey: key });
                     }
-                }
+                });
             }
-        }
-    });
-    
-    // Periodic sync every 5 seconds
-    setInterval(() => {
-        if (currentUser) {
-            syncWithGlobalData();
-        }
-    }, 5000);
+            loadChats();
+        });
+
+        // Listen for groups
+        database.ref('groups').on('value', (snapshot) => {
+            groups = [];
+            const groupsData = snapshot.val();
+            if (groupsData) {
+                Object.keys(groupsData).forEach(key => {
+                    const group = groupsData[key];
+                    if (group.members && group.members.includes(currentUser.id)) {
+                        groups.push({ ...group, firebaseKey: key });
+                    }
+                });
+            }
+            loadGroups();
+        });
+
+        // Update user online status
+        updateUserOnlineStatus(true);
+        
+        // Set up disconnect handler
+        database.ref('.info/connected').on('value', (snapshot) => {
+            if (snapshot.val() === true) {
+                database.ref(`users/${currentUser.firebaseKey}/online`).onDisconnect().set(false);
+                database.ref(`users/${currentUser.firebaseKey}/lastSeen`).onDisconnect().set(firebase.database.ServerValue.TIMESTAMP);
+            }
+        });
+    }
 }
 
-function syncWithGlobalData() {
-    // Merge local users with global users
-    globalUsers.forEach(globalUser => {
-        const existingIndex = users.findIndex(u => u.phone === globalUser.phone);
-        if (existingIndex === -1) {
-            users.push(globalUser);
-        } else {
-            // Update existing user data
-            users[existingIndex] = { ...users[existingIndex], ...globalUser };
-        }
-    });
-    
-    // Update current user in global list
-    const currentUserIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-    if (currentUserIndex === -1) {
-        globalUsers.push(currentUser);
-    } else {
-        globalUsers[currentUserIndex] = currentUser;
+function updateUserOnlineStatus(online) {
+    if (currentUser && currentUser.firebaseKey) {
+        database.ref(`users/${currentUser.firebaseKey}`).update({
+            online: online,
+            lastSeen: firebase.database.ServerValue.TIMESTAMP
+        });
     }
-    
-    saveData();
 }
 
 function setupEventListeners() {
@@ -137,11 +131,25 @@ function setupEventListeners() {
     
     // Profile picture input
     document.getElementById('profilePicInput').addEventListener('change', handleProfilePicChange);
+
+    // Window events for online status
+    window.addEventListener('beforeunload', () => {
+        updateUserOnlineStatus(false);
+    });
+
+    window.addEventListener('focus', () => {
+        updateUserOnlineStatus(true);
+    });
+
+    window.addEventListener('blur', () => {
+        updateUserOnlineStatus(false);
+    });
 }
 
 function showAuthScreen() {
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('chatApp').style.display = 'none';
+    showLoadingIndicator(false);
 }
 
 function showChatApp() {
@@ -150,11 +158,9 @@ function showChatApp() {
     
     if (currentUser) {
         updateUserProfile();
-        syncWithGlobalData();
-        loadUsers();
-        loadGroups();
-        loadChats();
+        setupRealTimeListeners();
     }
+    showLoadingIndicator(false);
 }
 
 function showLogin() {
@@ -167,42 +173,42 @@ function showRegister() {
     document.getElementById('registerForm').style.display = 'block';
 }
 
-function handleLogin(e) {
+async function handleLogin(e) {
     e.preventDefault();
+    showLoadingIndicator(true);
     
     const phone = document.getElementById('loginPhone').value;
     const password = document.getElementById('loginPassword').value;
     
-    // Check in global users first
-    let user = globalUsers.find(u => u.phone === phone && u.password === password);
-    
-    // If not found in global, check local
-    if (!user) {
-        user = users.find(u => u.phone === phone && u.password === password);
-    }
-    
-    if (user) {
-        currentUser = { ...user };
-        currentUser.online = true;
-        currentUser.lastSeen = new Date().toISOString();
+    try {
+        // Query Firebase for user with this phone number
+        const snapshot = await database.ref('users').orderByChild('phone').equalTo(phone).once('value');
+        const userData = snapshot.val();
         
-        // Add to local users if not exists
-        const localUserIndex = users.findIndex(u => u.phone === phone);
-        if (localUserIndex === -1) {
-            users.push(currentUser);
-        } else {
-            users[localUserIndex] = currentUser;
+        if (userData) {
+            const userKey = Object.keys(userData)[0];
+            const user = userData[userKey];
+            
+            if (user.password === password) {
+                currentUser = { ...user, firebaseKey: userKey };
+                localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
+                showChatApp();
+                return;
+            }
         }
         
-        saveData();
-        showChatApp();
-    } else {
         alert('Invalid phone number or password');
+        showLoadingIndicator(false);
+    } catch (error) {
+        console.error('Login error:', error);
+        alert('Login failed. Please try again.');
+        showLoadingIndicator(false);
     }
 }
 
-function handleRegister(e) {
+async function handleRegister(e) {
     e.preventDefault();
+    showLoadingIndicator(true);
     
     const name = document.getElementById('registerName').value;
     const phone = document.getElementById('registerPhone').value;
@@ -212,38 +218,43 @@ function handleRegister(e) {
     
     if (password !== confirmPassword) {
         alert('Passwords do not match');
+        showLoadingIndicator(false);
         return;
     }
     
-    // Check if user already exists in global users
-    if (globalUsers.find(u => u.phone === phone)) {
-        alert('User with this phone number already exists');
-        return;
+    try {
+        // Check if user already exists
+        const snapshot = await database.ref('users').orderByChild('phone').equalTo(phone).once('value');
+        if (snapshot.exists()) {
+            alert('User with this phone number already exists');
+            showLoadingIndicator(false);
+            return;
+        }
+        
+        // Create new user
+        const newUser = {
+            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+            name,
+            phone,
+            country,
+            password,
+            profilePic: '',
+            online: true,
+            lastSeen: firebase.database.ServerValue.TIMESTAMP,
+            createdAt: firebase.database.ServerValue.TIMESTAMP
+        };
+        
+        // Save to Firebase
+        const userRef = await database.ref('users').push(newUser);
+        currentUser = { ...newUser, firebaseKey: userRef.key };
+        
+        localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
+        showChatApp();
+    } catch (error) {
+        console.error('Registration error:', error);
+        alert('Registration failed. Please try again.');
+        showLoadingIndicator(false);
     }
-    
-    // Check if user already exists in local users
-    if (users.find(u => u.phone === phone)) {
-        alert('User with this phone number already exists');
-        return;
-    }
-    
-    // Create new user
-    const newUser = {
-        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
-        name,
-        phone,
-        country,
-        password,
-        profilePic: '',
-        online: true,
-        lastSeen: new Date().toISOString()
-    };
-    
-    users.push(newUser);
-    globalUsers.push(newUser);
-    currentUser = newUser;
-    saveData();
-    showChatApp();
 }
 
 function updateUserProfile() {
@@ -267,17 +278,19 @@ function handleProfilePicChange(e) {
     if (file) {
         const reader = new FileReader();
         reader.onload = function(e) {
-            currentUser.profilePic = e.target.result;
-            document.getElementById('userProfilePic').src = currentUser.profilePic;
+            const profilePic = e.target.result;
+            
+            // Update in Firebase
+            database.ref(`users/${currentUser.firebaseKey}`).update({
+                profilePic: profilePic
+            });
+            
+            // Update locally
+            currentUser.profilePic = profilePic;
+            document.getElementById('userProfilePic').src = profilePic;
             document.getElementById('userProfilePic').style.display = 'block';
             
-            // Update in global users
-            const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-            if (globalIndex !== -1) {
-                globalUsers[globalIndex].profilePic = currentUser.profilePic;
-            }
-            
-            saveData();
+            localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
         };
         reader.readAsDataURL(file);
     }
@@ -308,13 +321,15 @@ function loadUsers() {
     const usersList = document.getElementById('usersList');
     usersList.innerHTML = '';
     
-    // Combine local and global users, remove duplicates
-    const allUsers = [...users, ...globalUsers];
-    const uniqueUsers = allUsers.filter((user, index, self) => 
-        index === self.findIndex(u => u.phone === user.phone) && user.id !== currentUser.id
-    );
+    // Filter out current user and show all other users
+    const otherUsers = users.filter(user => user.id !== currentUser.id);
     
-    uniqueUsers.forEach(user => {
+    if (otherUsers.length === 0) {
+        usersList.innerHTML = '<div class="no-users">No other users online yet</div>';
+        return;
+    }
+    
+    otherUsers.forEach(user => {
         const userElement = createUserElement(user);
         usersList.appendChild(userElement);
     });
@@ -350,7 +365,7 @@ function loadGroups() {
     const groupsList = document.getElementById('groupsList');
     groupsList.innerHTML = '';
     
-    groups.filter(group => group.members.includes(currentUser.id)).forEach(group => {
+    groups.forEach(group => {
         const groupElement = createGroupElement(group);
         groupsList.appendChild(groupElement);
     });
@@ -376,9 +391,12 @@ function loadChats() {
     const chatsList = document.getElementById('chatsList');
     chatsList.innerHTML = '';
     
-    chats.filter(chat => 
-        chat.participants.includes(currentUser.id)
-    ).forEach(chat => {
+    if (chats.length === 0) {
+        chatsList.innerHTML = '<div class="no-chats">No chats yet</div>';
+        return;
+    }
+    
+    chats.forEach(chat => {
         const chatElement = createChatElement(chat);
         chatsList.appendChild(chatElement);
     });
@@ -389,11 +407,15 @@ function createChatElement(chat) {
     chatDiv.className = 'chat-item';
     chatDiv.onclick = () => openExistingChat(chat);
     
-    const otherParticipant = chat.type === 'user' ? 
-        [...users, ...globalUsers].find(u => u.id === chat.participants.find(p => p !== currentUser.id)) :
-        groups.find(g => g.id === chat.groupId);
+    let name = 'Unknown';
+    if (chat.type === 'user') {
+        const otherUser = users.find(u => u.id === chat.participants.find(p => p !== currentUser.id));
+        name = otherUser ? otherUser.name : 'Unknown User';
+    } else if (chat.type === 'group') {
+        const group = groups.find(g => g.id === chat.groupId);
+        name = group ? group.name : 'Unknown Group';
+    }
     
-    const name = otherParticipant ? otherParticipant.name : 'Unknown';
     const lastMessage = chat.lastMessage || 'No messages yet';
     
     chatDiv.innerHTML = `
@@ -407,30 +429,41 @@ function createChatElement(chat) {
     return chatDiv;
 }
 
-function startChat(target, type) {
+async function startChat(target, type) {
     let chatId;
     
     if (type === 'user') {
-        // Find existing chat or create new one
-        chatId = `${Math.min(currentUser.id, target.id)}_${Math.max(currentUser.id, target.id)}`;
+        // Create chat ID based on user IDs
+        chatId = [currentUser.id, target.id].sort().join('_');
         
-        let existingChat = chats.find(c => c.id === chatId);
-        if (!existingChat) {
-            existingChat = {
+        // Check if chat already exists
+        const chatSnapshot = await database.ref('chats').orderByChild('id').equalTo(chatId).once('value');
+        let existingChat = null;
+        
+        if (chatSnapshot.exists()) {
+            const chatData = chatSnapshot.val();
+            const chatKey = Object.keys(chatData)[0];
+            existingChat = { ...chatData[chatKey], firebaseKey: chatKey };
+        } else {
+            // Create new chat
+            const newChat = {
                 id: chatId,
                 type: 'user',
                 participants: [currentUser.id, target.id],
                 lastMessage: '',
-                lastMessageTime: new Date().toISOString()
+                lastMessageTime: firebase.database.ServerValue.TIMESTAMP,
+                createdAt: firebase.database.ServerValue.TIMESTAMP
             };
-            chats.push(existingChat);
+            
+            const chatRef = await database.ref('chats').push(newChat);
+            existingChat = { ...newChat, firebaseKey: chatRef.key };
         }
         
         currentChat = {
             ...existingChat,
             name: target.name,
             profilePic: target.profilePic,
-            status: target.online ? 'Online' : `Last seen ${formatTime(target.lastSeen)}`
+            status: target.online ? 'Online' : 'Offline'
         };
     } else if (type === 'group') {
         currentChat = {
@@ -439,7 +472,8 @@ function startChat(target, type) {
             name: target.name,
             profilePic: '',
             status: `${target.members.length} members`,
-            groupId: target.id
+            groupId: target.id,
+            firebaseKey: target.firebaseKey
         };
     }
     
@@ -448,13 +482,13 @@ function startChat(target, type) {
 
 function openExistingChat(chat) {
     if (chat.type === 'user') {
-        const otherUser = [...users, ...globalUsers].find(u => u.id === chat.participants.find(p => p !== currentUser.id));
+        const otherUser = users.find(u => u.id === chat.participants.find(p => p !== currentUser.id));
         if (otherUser) {
             currentChat = {
                 ...chat,
                 name: otherUser.name,
                 profilePic: otherUser.profilePic,
-                status: otherUser.online ? 'Online' : `Last seen ${formatTime(otherUser.lastSeen)}`
+                status: otherUser.online ? 'Online' : 'Offline'
             };
         }
     } else if (chat.type === 'group') {
@@ -506,6 +540,12 @@ function closeChatScreen() {
     
     document.getElementById('chatScreen').style.display = 'none';
     document.getElementById('welcomeScreen').style.display = 'flex';
+    
+    // Remove message listener
+    if (currentChat && currentChat.id) {
+        database.ref(`messages/${currentChat.id}`).off();
+    }
+    
     currentChat = null;
 }
 
@@ -513,14 +553,27 @@ function loadMessages() {
     const container = document.getElementById('messagesContainer');
     container.innerHTML = '';
     
-    const chatMessages = messages[currentChat.id] || [];
+    if (!currentChat || !currentChat.id) return;
     
-    chatMessages.forEach(message => {
-        const messageElement = createMessageElement(message);
-        container.appendChild(messageElement);
+    // Listen for messages in real-time
+    database.ref(`messages/${currentChat.id}`).on('value', (snapshot) => {
+        container.innerHTML = '';
+        const messagesData = snapshot.val();
+        
+        if (messagesData) {
+            const messagesList = Object.keys(messagesData).map(key => ({
+                ...messagesData[key],
+                firebaseKey: key
+            })).sort((a, b) => a.timestamp - b.timestamp);
+            
+            messagesList.forEach(message => {
+                const messageElement = createMessageElement(message);
+                container.appendChild(messageElement);
+            });
+        }
+        
+        container.scrollTop = container.scrollHeight;
     });
-    
-    container.scrollTop = container.scrollHeight;
 }
 
 function createMessageElement(message) {
@@ -528,7 +581,7 @@ function createMessageElement(message) {
     messageDiv.className = `message ${message.senderId === currentUser.id ? 'sent' : 'received'}`;
     
     const senderName = message.senderId === currentUser.id ? 'You' : 
-        ([...users, ...globalUsers].find(u => u.id === message.senderId)?.name || 'Unknown');
+        (users.find(u => u.id === message.senderId)?.name || 'Unknown');
     
     messageDiv.innerHTML = `
         <div class="message-bubble">
@@ -542,7 +595,7 @@ function createMessageElement(message) {
     return messageDiv;
 }
 
-function sendMessage() {
+async function sendMessage() {
     const input = document.getElementById('messageInput');
     const content = input.value.trim();
     
@@ -551,33 +604,29 @@ function sendMessage() {
     const message = {
         id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
         senderId: currentUser.id,
+        senderName: currentUser.name,
         content: content,
-        timestamp: new Date().toISOString()
+        timestamp: firebase.database.ServerValue.TIMESTAMP
     };
     
-    // Add message to messages
-    if (!messages[currentChat.id]) {
-        messages[currentChat.id] = [];
+    try {
+        // Save message to Firebase
+        await database.ref(`messages/${currentChat.id}`).push(message);
+        
+        // Update chat last message
+        if (currentChat.firebaseKey) {
+            await database.ref(`chats/${currentChat.firebaseKey}`).update({
+                lastMessage: content,
+                lastMessageTime: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
+        
+        // Clear input
+        input.value = '';
+    } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Failed to send message. Please try again.');
     }
-    messages[currentChat.id].push(message);
-    
-    // Update chat last message
-    const chatIndex = chats.findIndex(c => c.id === currentChat.id);
-    if (chatIndex !== -1) {
-        chats[chatIndex].lastMessage = content;
-        chats[chatIndex].lastMessageTime = message.timestamp;
-    }
-    
-    // Save data and broadcast
-    saveData();
-    
-    // Update UI
-    const messageElement = createMessageElement(message);
-    document.getElementById('messagesContainer').appendChild(messageElement);
-    document.getElementById('messagesContainer').scrollTop = document.getElementById('messagesContainer').scrollHeight;
-    
-    // Clear input
-    input.value = '';
 }
 
 function showCreateGroup() {
@@ -595,12 +644,9 @@ function loadAvailableUsers() {
     const container = document.getElementById('availableUsers');
     container.innerHTML = '';
     
-    const allUsers = [...users, ...globalUsers];
-    const uniqueUsers = allUsers.filter((user, index, self) => 
-        index === self.findIndex(u => u.phone === user.phone) && user.id !== currentUser.id
-    );
+    const otherUsers = users.filter(user => user.id !== currentUser.id);
     
-    uniqueUsers.forEach(user => {
+    otherUsers.forEach(user => {
         const userDiv = document.createElement('div');
         userDiv.className = 'user-checkbox';
         
@@ -614,7 +660,7 @@ function loadAvailableUsers() {
     });
 }
 
-function createGroup() {
+async function createGroup() {
     const name = document.getElementById('groupName').value.trim();
     const description = document.getElementById('groupDescription').value.trim();
     
@@ -637,28 +683,31 @@ function createGroup() {
         description: description,
         members: [currentUser.id, ...selectedUsers],
         createdBy: currentUser.id,
-        createdAt: new Date().toISOString()
+        createdAt: firebase.database.ServerValue.TIMESTAMP
     };
     
-    groups.push(group);
-    
-    // Create chat for the group
-    const groupChat = {
-        id: group.id,
-        type: 'group',
-        participants: group.members,
-        groupId: group.id,
-        lastMessage: '',
-        lastMessageTime: new Date().toISOString()
-    };
-    
-    chats.push(groupChat);
-    saveData();
-    
-    closeCreateGroup();
-    loadGroups();
-    
-    alert('Group created successfully!');
+    try {
+        // Save group to Firebase
+        const groupRef = await database.ref('groups').push(group);
+        
+        // Create chat for the group
+        const groupChat = {
+            id: group.id,
+            type: 'group',
+            participants: group.members,
+            groupId: group.id,
+            lastMessage: '',
+            lastMessageTime: firebase.database.ServerValue.TIMESTAMP
+        };
+        
+        await database.ref('chats').push(groupChat);
+        
+        closeCreateGroup();
+        alert('Group created successfully!');
+    } catch (error) {
+        console.error('Error creating group:', error);
+        alert('Failed to create group. Please try again.');
+    }
 }
 
 function handleSearch(e) {
@@ -669,18 +718,18 @@ function handleSearch(e) {
     
     if (activeTab === 'users') {
         document.querySelectorAll('.user-item').forEach(item => {
-            const name = item.querySelector('.user-name').textContent.toLowerCase();
-            const country = item.querySelector('.user-country').textContent.toLowerCase();
+            const name = item.querySelector('.user-name')?.textContent.toLowerCase() || '';
+            const country = item.querySelector('.user-country')?.textContent.toLowerCase() || '';
             item.style.display = (name.includes(query) || country.includes(query)) ? 'block' : 'none';
         });
     } else if (activeTab === 'groups') {
         document.querySelectorAll('.group-item').forEach(item => {
-            const name = item.querySelector('.group-name').textContent.toLowerCase();
+            const name = item.querySelector('.group-name')?.textContent.toLowerCase() || '';
             item.style.display = name.includes(query) ? 'block' : 'none';
         });
     } else if (activeTab === 'chats') {
         document.querySelectorAll('.chat-item').forEach(item => {
-            const name = item.querySelector('.chat-name').textContent.toLowerCase();
+            const name = item.querySelector('.chat-name')?.textContent.toLowerCase() || '';
             item.style.display = name.includes(query) ? 'block' : 'none';
         });
     }
@@ -688,18 +737,14 @@ function handleSearch(e) {
 
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
-        if (currentUser) {
-            currentUser.online = false;
-            currentUser.lastSeen = new Date().toISOString();
-            
-            // Update in global users
-            const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-            if (globalIndex !== -1) {
-                globalUsers[globalIndex].online = false;
-                globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
-            }
-            
-            saveData();
+        updateUserOnlineStatus(false);
+        
+        // Remove all listeners
+        database.ref('users').off();
+        database.ref('chats').off();
+        database.ref('groups').off();
+        if (currentChat && currentChat.id) {
+            database.ref(`messages/${currentChat.id}`).off();
         }
         
         currentUser = null;
@@ -776,6 +821,8 @@ function insertEmoji(emoji) {
 }
 
 function formatTime(timestamp) {
+    if (!timestamp) return '';
+    
     const date = new Date(timestamp);
     const now = new Date();
     const diffInMinutes = Math.floor((now - date) / (1000 * 60));
@@ -822,70 +869,5 @@ window.addEventListener('resize', function() {
     if (window.innerWidth > 768) {
         document.getElementById('sidebar').style.display = 'flex';
         document.getElementById('chatArea').style.display = 'flex';
-    }
-});
-
-// Update online status periodically
-setInterval(() => {
-    if (currentUser) {
-        currentUser.lastSeen = new Date().toISOString();
-        
-        // Update in global users
-        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-        if (globalIndex !== -1) {
-            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
-        }
-        
-        saveData();
-    }
-}, 30000); // Update every 30 seconds
-
-// Handle window focus/blur for online status
-window.addEventListener('focus', () => {
-    if (currentUser) {
-        currentUser.online = true;
-        currentUser.lastSeen = new Date().toISOString();
-        
-        // Update in global users
-        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-        if (globalIndex !== -1) {
-            globalUsers[globalIndex].online = true;
-            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
-        }
-        
-        saveData();
-    }
-});
-
-window.addEventListener('blur', () => {
-    if (currentUser) {
-        currentUser.online = false;
-        currentUser.lastSeen = new Date().toISOString();
-        
-        // Update in global users
-        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-        if (globalIndex !== -1) {
-            globalUsers[globalIndex].online = false;
-            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
-        }
-        
-        saveData();
-    }
-});
-
-// Handle page unload
-window.addEventListener('beforeunload', () => {
-    if (currentUser) {
-        currentUser.online = false;
-        currentUser.lastSeen = new Date().toISOString();
-        
-        // Update in global users
-        const globalIndex = globalUsers.findIndex(u => u.phone === currentUser.phone);
-        if (globalIndex !== -1) {
-            globalUsers[globalIndex].online = false;
-            globalUsers[globalIndex].lastSeen = currentUser.lastSeen;
-        }
-        
-        saveData();
     }
 });
