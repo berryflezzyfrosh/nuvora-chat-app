@@ -1,18 +1,16 @@
- // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
+// Firebase Configuration
+const firebaseConfig = {
     apiKey: "AIzaSyC7bFhndsJ_ax6U466E4xkv0SbXCdp1IGQ",
     authDomain: "nuvora-chat-app.firebaseapp.com",
-    projectId: "nuvora-chat-app",
-    storageBucket: "nuvora-chat-app.firebasestorage.app",
+    databaseURL: "https://nuvora-chat-app-default-rtdb.firebaseio.com",
+    projectId: "nuvora-chat-app.firebasestorage.app",
+    storageBucket: "nuvora-chat-app.appspot.com",
     messagingSenderId: "764236230983",
-    appId: "1:764236230983:web:d3dcc8f0b53e8c9ad59c62",
-    measurementId: "G-VNYG5C510E"
-  };
-
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
+    appId: "1:764236230983:web:d3dcc8f0b53e8c9ad59c62"
+};
+ // Initialize Firebase
+ firebase.initializeApp(firebaseConfig);
+  const database = firebase.database();
 
 // Global variables
 let currentUser = null;
