@@ -1,16 +1,22 @@
-// Firebase Configuration
+// Import Firebase modules
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getDatabase, ref, push, set, update, onValue, off, query, orderByChild, equalTo, serverTimestamp, onDisconnect } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-database.js";
+
+// Your Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyC7bFhndsJ_ax6U466E4xkv0SbXCdp1IGQ",
     authDomain: "nuvora-chat-app.firebaseapp.com",
-    databaseURL: "https://nuvora-chat-app-default-rtdb.firebaseio.com",
-    projectId: "nuvora-chat-app.firebasestorage.app",
-    storageBucket: "nuvora-chat-app.appspot.com",
+    databaseURL: "https://nuvora-chat-app-default-rtdb.firebaseio.com/",
+    projectId: "nuvora-chat-app",
+    storageBucket: "nuvora-chat-app.firebasestorage.app",
     messagingSenderId: "764236230983",
-    appId: "1:764236230983:web:d3dcc8f0b53e8c9ad59c62"
+    appId: "1:764236230983:web:d3dcc8f0b53e8c9ad59c62",
+    measurementId: "G-VNYG5C510E"
 };
- // Initialize Firebase
- firebase.initializeApp(firebaseConfig);
-  const database = firebase.database();
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
 
 // Global variables
 let currentUser = null;
@@ -19,8 +25,7 @@ let users = [];
 let groups = [];
 let chats = [];
 let messages = {};
-let userListeners = [];
-let messageListeners = [];
+let selectedGroupMembers = [];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -42,13 +47,10 @@ function initializeApp() {
     }
 }
 
-function showLoadingIndicator(show = true) {
-    document.getElementById('loadingIndicator').style.display = show ? 'flex' : 'none';
-}
-
 function setupRealTimeListeners() {
     // Listen for all users
-    database.ref('users').on('value', (snapshot) => {
+    const usersRef = ref(database, 'users');
+    onValue(usersRef, (snapshot) => {
         users = [];
         const usersData = snapshot.val();
         if (usersData) {
@@ -61,7 +63,8 @@ function setupRealTimeListeners() {
 
     // Listen for user's chats
     if (currentUser) {
-        database.ref('chats').orderByChild('participants').on('value', (snapshot) => {
+        const chatsRef = ref(database, 'chats');
+        onValue(chatsRef, (snapshot) => {
             chats = [];
             const chatsData = snapshot.val();
             if (chatsData) {
@@ -76,7 +79,8 @@ function setupRealTimeListeners() {
         });
 
         // Listen for groups
-        database.ref('groups').on('value', (snapshot) => {
+        const groupsRef = ref(database, 'groups');
+        onValue(groupsRef, (snapshot) => {
             groups = [];
             const groupsData = snapshot.val();
             if (groupsData) {
@@ -94,60 +98,36 @@ function setupRealTimeListeners() {
         updateUserOnlineStatus(true);
         
         // Set up disconnect handler
-        database.ref('.info/connected').on('value', (snapshot) => {
-            if (snapshot.val() === true) {
-                database.ref(`users/${currentUser.firebaseKey}/online`).onDisconnect().set(false);
-                database.ref(`users/${currentUser.firebaseKey}/lastSeen`).onDisconnect().set(firebase.database.ServerValue.TIMESTAMP);
-            }
-        });
-    }
-}
-
-function updateUserOnlineStatus(online) {
-    if (currentUser && currentUser.firebaseKey) {
-        database.ref(`users/${currentUser.firebaseKey}`).update({
-            online: online,
-            lastSeen: firebase.database.ServerValue.TIMESTAMP
-        });
+        if (currentUser.firebaseKey) {
+            const userOnlineRef = ref(database, `users/${currentUser.firebaseKey}/online`);
+            onDisconnect(userOnlineRef).set(false);
+        }
     }
 }
 
 function setupEventListeners() {
-    // Auth forms
-    document.getElementById('loginFormElement').addEventListener('submit', handleLogin);
-    document.getElementById('registerFormElement').addEventListener('submit', handleRegister);
-    
-    // Message input
-    document.getElementById('messageInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
-    });
-    
-    // Search
-    document.getElementById('searchInput').addEventListener('input', handleSearch);
-    
-    // Profile picture input
-    document.getElementById('profilePicInput').addEventListener('change', handleProfilePicChange);
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    };
 
-    // Window events for online status
+    // Handle window beforeunload
     window.addEventListener('beforeunload', () => {
-        updateUserOnlineStatus(false);
-    });
-
-    window.addEventListener('focus', () => {
-        updateUserOnlineStatus(true);
-    });
-
-    window.addEventListener('blur', () => {
-        updateUserOnlineStatus(false);
+        if (currentUser && currentUser.firebaseKey) {
+            updateUserOnlineStatus(false);
+        }
     });
 }
 
+// Authentication Functions
 function showAuthScreen() {
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('chatApp').style.display = 'none';
-    showLoadingIndicator(false);
 }
 
 function showChatApp() {
@@ -155,208 +135,183 @@ function showChatApp() {
     document.getElementById('chatApp').style.display = 'flex';
     
     if (currentUser) {
-        updateUserProfile();
-        setupRealTimeListeners();
+        document.getElementById('currentUserName').textContent = currentUser.name;
+        document.getElementById('currentUserPic').textContent = currentUser.name.charAt(0).toUpperCase();
+        document.getElementById('profileEditName').value = currentUser.name;
+        document.getElementById('profileEditBio').value = currentUser.bio || '';
+        document.getElementById('profileEditCountry').value = currentUser.country;
+        document.getElementById('profileEditPic').textContent = currentUser.name.charAt(0).toUpperCase();
     }
-    showLoadingIndicator(false);
 }
 
-function showLogin() {
+function showLoginForm() {
     document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('registerForm').style.display = 'none';
+    document.getElementById('signupForm').style.display = 'none';
 }
 
-function showRegister() {
+function showSignupForm() {
     document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
+    document.getElementById('signupForm').style.display = 'block';
 }
 
-async function handleLogin(e) {
-    e.preventDefault();
-    showLoadingIndicator(true);
+async function loginUser() {
+    const phone = document.getElementById('loginPhone').value.trim();
     
-    const phone = document.getElementById('loginPhone').value;
-    const password = document.getElementById('loginPassword').value;
-    
-    try {
-        // Query Firebase for user with this phone number
-        const snapshot = await database.ref('users').orderByChild('phone').equalTo(phone).once('value');
-        const userData = snapshot.val();
-        
-        if (userData) {
-            const userKey = Object.keys(userData)[0];
-            const user = userData[userKey];
-            
-            if (user.password === password) {
-                currentUser = { ...user, firebaseKey: userKey };
-                localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
-                showChatApp();
-                return;
-            }
-        }
-        
-        alert('Invalid phone number or password');
-        showLoadingIndicator(false);
-    } catch (error) {
-        console.error('Login error:', error);
-        alert('Login failed. Please try again.');
-        showLoadingIndicator(false);
-    }
-}
-
-async function handleRegister(e) {
-    e.preventDefault();
-    showLoadingIndicator(true);
-    
-    const name = document.getElementById('registerName').value;
-    const phone = document.getElementById('registerPhone').value;
-    const country = document.getElementById('registerCountry').value;
-    const password = document.getElementById('registerPassword').value;
-    const confirmPassword = document.getElementById('registerConfirmPassword').value;
-    
-    if (password !== confirmPassword) {
-        alert('Passwords do not match');
-        showLoadingIndicator(false);
+    if (!phone) {
+        alert('Please enter your phone number');
         return;
     }
-    
+
+    showLoadingIndicator(true);
+
     try {
-        // Check if user already exists
-        const snapshot = await database.ref('users').orderByChild('phone').equalTo(phone).once('value');
-        if (snapshot.exists()) {
-            alert('User with this phone number already exists');
-            showLoadingIndicator(false);
-            return;
-        }
+        // Query users by phone number
+        const usersRef = ref(database, 'users');
+        const phoneQuery = query(usersRef, orderByChild('phone'), equalTo(phone));
         
-        // Create new user
-        const newUser = {
-            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
-            name,
-            phone,
-            country,
-            password,
-            profilePic: '',
-            online: true,
-            lastSeen: firebase.database.ServerValue.TIMESTAMP,
-            createdAt: firebase.database.ServerValue.TIMESTAMP
-        };
-        
-        // Save to Firebase
-        const userRef = await database.ref('users').push(newUser);
-        currentUser = { ...newUser, firebaseKey: userRef.key };
-        
-        localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
-        showChatApp();
+        onValue(phoneQuery, (snapshot) => {
+            const userData = snapshot.val();
+            if (userData) {
+                const userKey = Object.keys(userData)[0];
+                const user = { ...userData[userKey], firebaseKey: userKey };
+                
+                currentUser = user;
+                localStorage.setItem('nuvoraCurrentUser', JSON.stringify(user));
+                
+                showChatApp();
+                setupRealTimeListeners();
+                showLoadingIndicator(false);
+            } else {
+                showLoadingIndicator(false);
+                alert('User not found. Please check your phone number or sign up.');
+            }
+        }, { onlyOnce: true });
+
     } catch (error) {
-        console.error('Registration error:', error);
-        alert('Registration failed. Please try again.');
         showLoadingIndicator(false);
+        console.error('Login error:', error);
+        alert('Login failed. Please try again.');
     }
 }
 
-function updateUserProfile() {
-    document.getElementById('currentUserName').textContent = currentUser.name;
-    document.getElementById('currentUserCountry').textContent = currentUser.country;
-    
-    if (currentUser.profilePic) {
-        document.getElementById('userProfilePic').src = currentUser.profilePic;
-        document.getElementById('userProfilePic').style.display = 'block';
-    } else {
-        document.getElementById('userProfilePic').style.display = 'none';
+async function signupUser() {
+    const name = document.getElementById('signupName').value.trim();
+    const phone = document.getElementById('signupPhone').value.trim();
+    const country = document.getElementById('signupCountry').value.trim();
+    const bio = document.getElementById('signupBio').value.trim();
+
+    if (!name || !phone || !country) {
+        alert('Please fill in all required fields');
+        return;
     }
-}
 
-function changeProfilePic() {
-    document.getElementById('profilePicInput').click();
-}
+    showLoadingIndicator(true);
 
-function handleProfilePicChange(e) {
-    const file = e.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const profilePic = e.target.result;
+    try {
+        // Check if phone number already exists
+        const usersRef = ref(database, 'users');
+        const phoneQuery = query(usersRef, orderByChild('phone'), equalTo(phone));
+        
+        onValue(phoneQuery, async (snapshot) => {
+            const existingUser = snapshot.val();
+            if (existingUser) {
+                showLoadingIndicator(false);
+                alert('Phone number already registered. Please login instead.');
+                return;
+            }
+
+            // Create new user
+            const newUserRef = push(usersRef);
+            const userId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
             
-            // Update in Firebase
-            database.ref(`users/${currentUser.firebaseKey}`).update({
-                profilePic: profilePic
-            });
+            const userData = {
+                id: userId,
+                name: name,
+                phone: phone,
+                country: country,
+                bio: bio,
+                online: true,
+                lastSeen: serverTimestamp(),
+                createdAt: serverTimestamp()
+            };
+
+            await set(newUserRef, userData);
             
-            // Update locally
-            currentUser.profilePic = profilePic;
-            document.getElementById('userProfilePic').src = profilePic;
-            document.getElementById('userProfilePic').style.display = 'block';
-            
+            currentUser = { ...userData, firebaseKey: newUserRef.key };
             localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
-        };
-        reader.readAsDataURL(file);
+            
+            showChatApp();
+            setupRealTimeListeners();
+            showLoadingIndicator(false);
+            
+        }, { onlyOnce: true });
+
+    } catch (error) {
+        showLoadingIndicator(false);
+        console.error('Signup error:', error);
+        alert('Signup failed. Please try again.');
     }
 }
 
+function logoutUser() {
+    if (currentUser && currentUser.firebaseKey) {
+        updateUserOnlineStatus(false);
+    }
+    
+    currentUser = null;
+    localStorage.removeItem('nuvoraCurrentUser');
+    showAuthScreen();
+    
+    // Clear all data
+    users = [];
+    groups = [];
+    chats = [];
+    messages = {};
+    currentChat = null;
+}
+
+// User status functions
+async function updateUserOnlineStatus(isOnline) {
+    if (currentUser && currentUser.firebaseKey) {
+        const userRef = ref(database, `users/${currentUser.firebaseKey}`);
+        await update(userRef, {
+            online: isOnline,
+            lastSeen: serverTimestamp()
+        });
+    }
+}
+
+// UI Functions
 function showTab(tabName) {
-    // Hide all tabs
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.style.display = 'none';
-    });
+    // Remove active class from all tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     
-    // Remove active class from all buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    // Show selected tab
-    document.getElementById(tabName + 'Tab').style.display = 'block';
+    // Add active class to selected tab
     event.target.classList.add('active');
-    
-    // Load content based on tab
-    if (tabName === 'users') loadUsers();
-    else if (tabName === 'groups') loadGroups();
-    else if (tabName === 'chats') loadChats();
+    document.getElementById(tabName + 'Tab').classList.add('active');
 }
 
 function loadUsers() {
     const usersList = document.getElementById('usersList');
     usersList.innerHTML = '';
     
-    // Filter out current user and show all other users
-    const otherUsers = users.filter(user => user.id !== currentUser.id);
-    
-    if (otherUsers.length === 0) {
-        usersList.innerHTML = '<div class="no-users">No other users online yet</div>';
-        return;
-    }
-    
-    otherUsers.forEach(user => {
-        const userElement = createUserElement(user);
-        usersList.appendChild(userElement);
+    users.forEach(user => {
+        if (user.id !== currentUser.id) {
+            const userElement = createUserElement(user);
+            usersList.appendChild(userElement);
+        }
     });
 }
 
-function createUserElement(user) {
-    const userDiv = document.createElement('div');
-    userDiv.className = 'user-item';
-    userDiv.onclick = () => startChat(user, 'user');
+function loadChats() {
+    const chatsList = document.getElementById('chatsList');
+    chatsList.innerHTML = '';
     
-    const avatar = user.profilePic ? 
-        `<img src="${user.profilePic}" alt="${user.name}" class="user-avatar">` :
-        `<div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>`;
-    
-    const onlineStatus = user.online ? 
-        '<div class="online-indicator"></div>' : '';
-    
-    userDiv.innerHTML = `
-        <div style="position: relative;">
-            ${avatar}
-            ${onlineStatus}
-        </div>
-        <div class="user-details">
-            <div class="user-name">${user.name}</div>
-            <div class="user-country">${user.country}</div>
-        </div>
-    `;
-    
-    return userDiv;
+    chats.forEach(chat => {
+        const chatElement = createChatElement(chat);
+        chatsList.appendChild(chatElement);
+    });
 }
 
 function loadGroups() {
@@ -369,503 +324,475 @@ function loadGroups() {
     });
 }
 
-function createGroupElement(group) {
-    const groupDiv = document.createElement('div');
-    groupDiv.className = 'group-item';
-    groupDiv.onclick = () => startChat(group, 'group');
+function createUserElement(user) {
+    const div = document.createElement('div');
+    div.className = 'user-item';
+    div.onclick = () => startChatWithUser(user);
     
-    groupDiv.innerHTML = `
-        <div class="group-avatar">👥</div>
-        <div class="group-details">
-            <div class="group-name">${group.name}</div>
-            <div class="group-members">${group.members.length} members</div>
+    div.innerHTML = `
+        <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+        <div class="user-info">
+            <h4>${user.name}</h4>
+            <p>${user.country}</p>
+            <span class="user-status ${user.online ? 'online' : 'offline'}">
+                ${user.online ? 'Online' : 'Last seen recently'}
+            </span>
         </div>
     `;
     
-    return groupDiv;
-}
-
-function loadChats() {
-    const chatsList = document.getElementById('chatsList');
-    chatsList.innerHTML = '';
-    
-    if (chats.length === 0) {
-        chatsList.innerHTML = '<div class="no-chats">No chats yet</div>';
-        return;
-    }
-    
-    chats.forEach(chat => {
-        const chatElement = createChatElement(chat);
-        chatsList.appendChild(chatElement);
-    });
+    return div;
 }
 
 function createChatElement(chat) {
-    const chatDiv = document.createElement('div');
-    chatDiv.className = 'chat-item';
-    chatDiv.onclick = () => openExistingChat(chat);
+    const div = document.createElement('div');
+    div.className = 'chat-item';
+    div.onclick = () => openChat(chat);
     
-    let name = 'Unknown';
-    if (chat.type === 'user') {
-        const otherUser = users.find(u => u.id === chat.participants.find(p => p !== currentUser.id));
-        name = otherUser ? otherUser.name : 'Unknown User';
-    } else if (chat.type === 'group') {
-        const group = groups.find(g => g.id === chat.groupId);
-        name = group ? group.name : 'Unknown Group';
+    // Get other participant
+    const otherParticipantId = chat.participants.find(id => id !== currentUser.id);
+    const otherUser = users.find(u => u.id === otherParticipantId);
+    
+    if (otherUser) {
+        div.innerHTML = `
+            <div class="chat-avatar">${otherUser.name.charAt(0).toUpperCase()}</div>
+            <div class="chat-info">
+                <h4>${otherUser.name}</h4>
+                <p>${chat.lastMessage || 'No messages yet'}</p>
+                <span class="chat-time">${formatTime(chat.lastMessageTime)}</span>
+            </div>
+        `;
     }
     
-    const lastMessage = chat.lastMessage || 'No messages yet';
+    return div;
+}
+
+function createGroupElement(group) {
+    const div = document.createElement('div');
+    div.className = 'group-item';
+    div.onclick = () => openGroup(group);
     
-    chatDiv.innerHTML = `
-        <div class="chat-avatar">${name.charAt(0).toUpperCase()}</div>
-        <div class="chat-details">
-            <div class="chat-name">${name}</div>
-            <div class="chat-preview">${lastMessage}</div>
+    div.innerHTML = `
+        <div class="group-avatar">👥</div>
+        <div class="group-info">
+            <h4>${group.name}</h4>
+            <p>${group.description || 'Group chat'}</p>
+            <span class="group-members">${group.members.length} members</span>
         </div>
     `;
     
-    return chatDiv;
+    return div;
 }
 
-async function startChat(target, type) {
-    let chatId;
+// Chat Functions
+async function startChatWithUser(user) {
+    // Check if chat already exists
+    const existingChat = chats.find(chat => 
+        chat.participants.includes(currentUser.id) && 
+        chat.participants.includes(user.id) &&
+        chat.participants.length === 2
+    );
     
-    if (type === 'user') {
-        // Create chat ID based on user IDs
-        chatId = [currentUser.id, target.id].sort().join('_');
-        
-        // Check if chat already exists
-        const chatSnapshot = await database.ref('chats').orderByChild('id').equalTo(chatId).once('value');
-        let existingChat = null;
-        
-        if (chatSnapshot.exists()) {
-            const chatData = chatSnapshot.val();
-            const chatKey = Object.keys(chatData)[0];
-            existingChat = { ...chatData[chatKey], firebaseKey: chatKey };
-        } else {
-            // Create new chat
-            const newChat = {
-                id: chatId,
-                type: 'user',
-                participants: [currentUser.id, target.id],
-                lastMessage: '',
-                lastMessageTime: firebase.database.ServerValue.TIMESTAMP,
-                createdAt: firebase.database.ServerValue.TIMESTAMP
-            };
-            
-            const chatRef = await database.ref('chats').push(newChat);
-            existingChat = { ...newChat, firebaseKey: chatRef.key };
-        }
-        
-        currentChat = {
-            ...existingChat,
-            name: target.name,
-            profilePic: target.profilePic,
-            status: target.online ? 'Online' : 'Offline'
-        };
-    } else if (type === 'group') {
-        currentChat = {
-            id: target.id,
-            type: 'group',
-            name: target.name,
-            profilePic: '',
-            status: `${target.members.length} members`,
-            groupId: target.id,
-            firebaseKey: target.firebaseKey
-        };
+    if (existingChat) {
+        openChat(existingChat);
+        return;
     }
     
-    openChat();
+    // Create new chat
+    const chatsRef = ref(database, 'chats');
+    const newChatRef = push(chatsRef);
+    
+    const chatData = {
+        participants: [currentUser.id, user.id],
+        createdAt: serverTimestamp(),
+        lastMessage: '',
+        lastMessageTime: serverTimestamp()
+    };
+    
+    await set(newChatRef, chatData);
+    
+    const newChat = { ...chatData, firebaseKey: newChatRef.key };
+    openChat(newChat);
 }
 
-function openExistingChat(chat) {
-    if (chat.type === 'user') {
-        const otherUser = users.find(u => u.id === chat.participants.find(p => p !== currentUser.id));
-        if (otherUser) {
-            currentChat = {
-                ...chat,
-                name: otherUser.name,
-                profilePic: otherUser.profilePic,
-                status: otherUser.online ? 'Online' : 'Offline'
-            };
-        }
-    } else if (chat.type === 'group') {
-        const group = groups.find(g => g.id === chat.groupId);
-        if (group) {
-            currentChat = {
-                ...chat,
-                name: group.name,
-                profilePic: '',
-                status: `${group.members.length} members`
-            };
-        }
+function openChat(chat) {
+    currentChat = chat;
+    
+    // Get other participant
+    const otherParticipantId = chat.participants.find(id => id !== currentUser.id);
+    const otherUser = users.find(u => u.id === otherParticipantId);
+    
+    if (otherUser) {
+        document.getElementById('chatName').textContent = otherUser.name;
+        document.getElementById('chatStatus').textContent = otherUser.online ? 'Online' : 'Last seen recently';
+        document.getElementById('chatAvatar').textContent = otherUser.name.charAt(0).toUpperCase();
     }
     
-    openChat();
-}
-
-function openChat() {
-    // Hide sidebar on mobile
-    if (window.innerWidth <= 768) {
-        document.getElementById('sidebar').style.display = 'none';
-        document.getElementById('chatArea').style.display = 'flex';
-    }
-    
+    // Show chat container
     document.getElementById('welcomeScreen').style.display = 'none';
-    document.getElementById('chatScreen').style.display = 'flex';
-    
-    // Update chat header
-    document.getElementById('chatName').textContent = currentChat.name;
-    document.getElementById('chatStatus').textContent = currentChat.status;
-    
-    if (currentChat.profilePic) {
-        document.getElementById('chatProfilePic').src = currentChat.profilePic;
-        document.getElementById('chatProfilePic').style.display = 'block';
-    } else {
-        document.getElementById('chatProfilePic').style.display = 'none';
-    }
+    document.getElementById('chatContainer').style.display = 'flex';
     
     // Load messages
-    loadMessages();
+    loadMessages(chat.firebaseKey);
 }
 
-function closeChatScreen() {
-    // Show sidebar and hide chat on mobile
-    if (window.innerWidth <= 768) {
-        document.getElementById('sidebar').style.display = 'flex';
-        document.getElementById('chatArea').style.display = 'none';
-    }
+function openGroup(group) {
+    currentChat = group;
     
-    document.getElementById('chatScreen').style.display = 'none';
-    document.getElementById('welcomeScreen').style.display = 'flex';
+    document.getElementById('chatName').textContent = group.name;
+    document.getElementById('chatStatus').textContent = `${group.members.length} members`;
+    document.getElementById('chatAvatar').textContent = '👥';
     
-    // Remove message listener
-    if (currentChat && currentChat.id) {
-        database.ref(`messages/${currentChat.id}`).off();
-    }
+    // Show chat container
+    document.getElementById('welcomeScreen').style.display = 'none';
+    document.getElementById('chatContainer').style.display = 'flex';
     
-    currentChat = null;
+    // Load messages
+    loadMessages(group.firebaseKey);
 }
 
-function loadMessages() {
-    const container = document.getElementById('messagesContainer');
-    container.innerHTML = '';
+function loadMessages(chatId) {
+    const messagesRef = ref(database, `messages/${chatId}`);
     
-    if (!currentChat || !currentChat.id) return;
-    
-    // Listen for messages in real-time
-    database.ref(`messages/${currentChat.id}`).on('value', (snapshot) => {
-        container.innerHTML = '';
+    onValue(messagesRef, (snapshot) => {
         const messagesData = snapshot.val();
+        const messagesList = document.getElementById('messagesList');
+        messagesList.innerHTML = '';
         
         if (messagesData) {
-            const messagesList = Object.keys(messagesData).map(key => ({
+            const messagesArray = Object.keys(messagesData).map(key => ({
                 ...messagesData[key],
                 firebaseKey: key
-            })).sort((a, b) => a.timestamp - b.timestamp);
+            }));
             
-            messagesList.forEach(message => {
+            // Sort by timestamp
+            messagesArray.sort((a, b) => a.timestamp - b.timestamp);
+            
+            messagesArray.forEach(message => {
                 const messageElement = createMessageElement(message);
-                container.appendChild(messageElement);
+                messagesList.appendChild(messageElement);
             });
+            
+            // Scroll to bottom
+            const messagesContainer = document.getElementById('messagesContainer');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
-        
-        container.scrollTop = container.scrollHeight;
     });
 }
 
 function createMessageElement(message) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${message.senderId === currentUser.id ? 'sent' : 'received'}`;
+    const div = document.createElement('div');
+    div.className = `message ${message.senderId === currentUser.id ? 'sent' : 'received'}`;
     
-    const senderName = message.senderId === currentUser.id ? 'You' : 
-        (users.find(u => u.id === message.senderId)?.name || 'Unknown');
+    const sender = users.find(u => u.id === message.senderId);
+    const senderName = sender ? sender.name : 'Unknown';
     
-    messageDiv.innerHTML = `
-        <div class="message-bubble">
-            <div class="message-content">${message.content}</div>
-            <div class="message-meta">
-                <span class="message-time">${formatTime(message.timestamp)}</span>
-            </div>
+    div.innerHTML = `
+        <div class="message-content">
+            ${message.senderId !== currentUser.id ? `<div class="message-sender">${senderName}</div>` : ''}
+            <div class="message-text">${message.text}</div>
+            <div class="message-time">${formatTime(message.timestamp)}</div>
         </div>
     `;
     
-    return messageDiv;
+    return div;
 }
 
 async function sendMessage() {
-    const input = document.getElementById('messageInput');
-    const content = input.value.trim();
+    const messageInput = document.getElementById('messageInput');
+    const messageText = messageInput.value.trim();
     
-    if (!content || !currentChat) return;
+    if (!messageText || !currentChat) return;
     
-    const message = {
-        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+    const messagesRef = ref(database, `messages/${currentChat.firebaseKey}`);
+    const newMessageRef = push(messagesRef);
+    
+    const messageData = {
+        text: messageText,
         senderId: currentUser.id,
-        senderName: currentUser.name,
-        content: content,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
+        timestamp: serverTimestamp()
     };
     
-    try {
-        // Save message to Firebase
-        await database.ref(`messages/${currentChat.id}`).push(message);
-        
-        // Update chat last message
-        if (currentChat.firebaseKey) {
-            await database.ref(`chats/${currentChat.firebaseKey}`).update({
-                lastMessage: content,
-                lastMessageTime: firebase.database.ServerValue.TIMESTAMP
-            });
-        }
-        
-        // Clear input
-        input.value = '';
-    } catch (error) {
-        console.error('Error sending message:', error);
-        alert('Failed to send message. Please try again.');
+    await set(newMessageRef, messageData);
+    
+    // Update chat's last message
+    const chatRef = ref(database, `chats/${currentChat.firebaseKey}`);
+    await update(chatRef, {
+        lastMessage: messageText,
+        lastMessageTime: serverTimestamp()
+    });
+    
+    messageInput.value = '';
+}
+
+function handleMessageKeyPress(event) {
+    if (event.key === 'Enter') {
+        sendMessage();
     }
 }
 
-function showCreateGroup() {
-    document.getElementById('createGroupModal').style.display = 'flex';
-    loadAvailableUsers();
+// Modal Functions
+function showModal(modalId) {
+    document.getElementById(modalId).style.display = 'flex';
 }
 
-function closeCreateGroup() {
-    document.getElementById('createGroupModal').style.display = 'none';
-    document.getElementById('groupName').value = '';
-    document.getElementById('groupDescription').value = '';
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
 }
 
-function loadAvailableUsers() {
-    const container = document.getElementById('availableUsers');
-    container.innerHTML = '';
+function showProfileModal() {
+    showModal('profileModal');
+}
+
+function showNewChatModal() {
+    showModal('newChatModal');
+    loadUsersForChat();
+}
+
+function showNewGroupModal() {
+    showModal('newGroupModal');
+    selectedGroupMembers = [];
+    loadUsersForGroup();
+}
+
+function loadUsersForChat() {
+    const searchUsersList = document.getElementById('searchUsersList');
+    searchUsersList.innerHTML = '';
     
-    const otherUsers = users.filter(user => user.id !== currentUser.id);
+    users.forEach(user => {
+        if (user.id !== currentUser.id) {
+            const userElement = document.createElement('div');
+            userElement.className = 'search-user-item';
+            userElement.onclick = () => {
+                startChatWithUser(user);
+                closeModal('newChatModal');
+            };
+            
+            userElement.innerHTML = `
+                <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+                <div class="user-info">
+                    <h4>${user.name}</h4>
+                    <p>${user.country}</p>
+                </div>
+            `;
+            
+            searchUsersList.appendChild(userElement);
+        }
+    });
+}
+
+function loadUsersForGroup() {
+    const groupMembersList = document.getElementById('groupMembersList');
+    groupMembersList.innerHTML = '';
     
-    otherUsers.forEach(user => {
-        const userDiv = document.createElement('div');
-        userDiv.className = 'user-checkbox';
-        
-        userDiv.innerHTML = `
-            <input type="checkbox" id="user_${user.id}" value="${user.id}">
-            <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
-            <label for="user_${user.id}">${user.name} (${user.country})</label>
-        `;
-        
-        container.appendChild(userDiv);
+    users.forEach(user => {
+        if (user.id !== currentUser.id) {
+            const userElement = document.createElement('div');
+            userElement.className = 'search-user-item';
+            userElement.onclick = () => toggleGroupMember(user);
+            
+            userElement.innerHTML = `
+                <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+                <div class="user-info">
+                    <h4>${user.name}</h4>
+                    <p>${user.country}</p>
+                </div>
+                <div class="member-checkbox">
+                    <input type="checkbox" ${selectedGroupMembers.includes(user.id) ? 'checked' : ''}>
+                </div>
+            `;
+            
+            groupMembersList.appendChild(userElement);
+        }
+    });
+}
+
+function toggleGroupMember(user) {
+    const index = selectedGroupMembers.indexOf(user.id);
+    if (index > -1) {
+        selectedGroupMembers.splice(index, 1);
+    } else {
+        selectedGroupMembers.push(user.id);
+    }
+    
+    loadUsersForGroup();
+    updateSelectedMembersDisplay();
+}
+
+function updateSelectedMembersDisplay() {
+    const selectedMembersDiv = document.getElementById('selectedMembers');
+    selectedMembersDiv.innerHTML = '';
+    
+    selectedGroupMembers.forEach(memberId => {
+        const user = users.find(u => u.id === memberId);
+        if (user) {
+            const memberElement = document.createElement('div');
+            memberElement.className = 'selected-member';
+            memberElement.innerHTML = `
+                <span>${user.name}</span>
+                <button onclick="toggleGroupMember({id: '${user.id}'})">&times;</button>
+            `;
+            selectedMembersDiv.appendChild(memberElement);
+        }
     });
 }
 
 async function createGroup() {
-    const name = document.getElementById('groupName').value.trim();
-    const description = document.getElementById('groupDescription').value.trim();
+    const groupName = document.getElementById('groupNameInput').value.trim();
+    const groupDesc = document.getElementById('groupDescInput').value.trim();
     
-    if (!name) {
-        alert('Please enter a group name');
+    if (!groupName || selectedGroupMembers.length === 0) {
+        alert('Please enter group name and select at least one member');
         return;
     }
     
-    const selectedUsers = Array.from(document.querySelectorAll('#availableUsers input:checked'))
-        .map(input => input.value);
+    const groupsRef = ref(database, 'groups');
+    const newGroupRef = push(groupsRef);
     
-    if (selectedUsers.length === 0) {
-        alert('Please select at least one member');
-        return;
-    }
-    
-    const group = {
-        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
-        name: name,
-        description: description,
-        members: [currentUser.id, ...selectedUsers],
+    const groupData = {
+        name: groupName,
+        description: groupDesc,
+        members: [currentUser.id, ...selectedGroupMembers],
         createdBy: currentUser.id,
-        createdAt: firebase.database.ServerValue.TIMESTAMP
+        createdAt: serverTimestamp()
     };
     
-    try {
-        // Save group to Firebase
-        const groupRef = await database.ref('groups').push(group);
-        
-        // Create chat for the group
-        const groupChat = {
-            id: group.id,
-            type: 'group',
-            participants: group.members,
-            groupId: group.id,
-            lastMessage: '',
-            lastMessageTime: firebase.database.ServerValue.TIMESTAMP
-        };
-        
-        await database.ref('chats').push(groupChat);
-        
-        closeCreateGroup();
-        alert('Group created successfully!');
-    } catch (error) {
-        console.error('Error creating group:', error);
-        alert('Failed to create group. Please try again.');
-    }
+    await set(newGroupRef, groupData);
+    
+    closeModal('newGroupModal');
+    
+    // Clear form
+    document.getElementById('groupNameInput').value = '';
+    document.getElementById('groupDescInput').value = '';
+    selectedGroupMembers = [];
 }
 
-function handleSearch(e) {
-    const query = e.target.value.toLowerCase();
+async function updateProfile() {
+    const name = document.getElementById('profileEditName').value.trim();
+    const bio = document.getElementById('profileEditBio').value.trim();
+    const country = document.getElementById('profileEditCountry').value.trim();
     
-    // Search in current tab
-    const activeTab = document.querySelector('.tab-btn.active').textContent.toLowerCase();
-    
-    if (activeTab === 'users') {
-        document.querySelectorAll('.user-item').forEach(item => {
-            const name = item.querySelector('.user-name')?.textContent.toLowerCase() || '';
-            const country = item.querySelector('.user-country')?.textContent.toLowerCase() || '';
-            item.style.display = (name.includes(query) || country.includes(query)) ? 'block' : 'none';
-        });
-    } else if (activeTab === 'groups') {
-        document.querySelectorAll('.group-item').forEach(item => {
-            const name = item.querySelector('.group-name')?.textContent.toLowerCase() || '';
-            item.style.display = name.includes(query) ? 'block' : 'none';
-        });
-    } else if (activeTab === 'chats') {
-        document.querySelectorAll('.chat-item').forEach(item => {
-            const name = item.querySelector('.chat-name')?.textContent.toLowerCase() || '';
-            item.style.display = name.includes(query) ? 'block' : 'none';
-        });
-    }
-}
-
-function logout() {
-    if (confirm('Are you sure you want to logout?')) {
-        updateUserOnlineStatus(false);
-        
-        // Remove all listeners
-        database.ref('users').off();
-        database.ref('chats').off();
-        database.ref('groups').off();
-        if (currentChat && currentChat.id) {
-            database.ref(`messages/${currentChat.id}`).off();
-        }
-        
-        currentUser = null;
-        currentChat = null;
-        
-        localStorage.removeItem('nuvoraCurrentUser');
-        showAuthScreen();
-    }
-}
-
-function showChatInfo() {
-    if (!currentChat) return;
-    
-    let info = `Chat: ${currentChat.name}\n`;
-    info += `Type: ${currentChat.type}\n`;
-    
-    if (currentChat.type === 'group') {
-        const group = groups.find(g => g.id === currentChat.groupId);
-        if (group) {
-            info += `Members: ${group.members.length}\n`;
-            info += `Created: ${formatTime(group.createdAt)}\n`;
-            if (group.description) {
-                info += `Description: ${group.description}`;
-            }
-        }
-    } else {
-        info += `Status: ${currentChat.status}`;
+    if (!name || !country) {
+        alert('Name and country are required');
+        return;
     }
     
-    alert(info);
-}
-
-function toggleEmojiPicker() {
-    const picker = document.getElementById('emojiPicker');
-    picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
-}
-
-function populateEmojis() {
-    const emojiGrid = document.querySelector('.emoji-grid');
-    const emojis = [
-        '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
-        '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
-        '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩',
-        '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣',
-        '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬',
-        '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗',
-        '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯',
-        '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐',
-        '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈',
-        '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾',
-        '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿',
-        '😾', '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤏', '✌️', '🤞',
-        '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍',
-        '👎', '👊', '✊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝',
-        '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶', '👂',
-        '🦻', '👃', '🧠', '🫀', '🫁', '🦷', '🦴', '👀', '👁️', '👅',
-        '👄', '💋', '🩸'
-    ];
+    const userRef = ref(database, `users/${currentUser.firebaseKey}`);
+    await update(userRef, {
+        name: name,
+        bio: bio,
+        country: country
+    });
     
-    emojis.forEach(emoji => {
-        const emojiBtn = document.createElement('button');
-        emojiBtn.className = 'emoji-btn';
-        emojiBtn.textContent = emoji;
-        emojiBtn.onclick = () => insertEmoji(emoji);
-        emojiGrid.appendChild(emojiBtn);
+    // Update local user data
+    currentUser.name = name;
+    currentUser.bio = bio;
+    currentUser.country = country;
+    localStorage.setItem('nuvoraCurrentUser', JSON.stringify(currentUser));
+    
+    // Update UI
+    document.getElementById('currentUserName').textContent = name;
+    document.getElementById('currentUserPic').textContent = name.charAt(0).toUpperCase();
+    
+    closeModal('profileModal');
+}
+
+// Search Functions
+function searchChats() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const chatItems = document.querySelectorAll('.chat-item, .user-item, .group-item');
+    
+    chatItems.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(searchTerm) ? 'flex' : 'none';
     });
 }
 
-function insertEmoji(emoji) {
-    const input = document.getElementById('messageInput');
-    input.value += emoji;
-    input.focus();
-    document.getElementById('emojiPicker').style.display = 'none';
+function searchUsers() {
+    const searchTerm = document.getElementById('userSearchInput').value.toLowerCase();
+    const userItems = document.querySelectorAll('#searchUsersList .search-user-item');
+    
+    userItems.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(searchTerm) ? 'flex' : 'none';
+    });
 }
 
+function searchGroupMembers() {
+    const searchTerm = document.getElementById('groupMemberSearch').value.toLowerCase();
+    const userItems = document.querySelectorAll('#groupMembersList .search-user-item');
+    
+    userItems.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(searchTerm) ? 'flex' : 'none';
+    });
+}
+
+// Emoji Functions
+function populateEmojis() {
+    const emojiPicker = document.getElementById('emojiPicker');
+    const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕'];
+    
+    emojis.forEach(emoji => {
+        const emojiElement = document.createElement('span');
+        emojiElement.className = 'emoji';
+        emojiElement.textContent = emoji;
+        emojiElement.onclick = () => insertEmoji(emoji);
+        emojiPicker.appendChild(emojiElement);
+    });
+}
+
+function toggleEmojiPicker() {
+    const emojiPicker = document.getElementById('emojiPicker');
+    emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
+}
+
+function insertEmoji(emoji) {
+    const messageInput = document.getElementById('messageInput');
+    messageInput.value += emoji;
+    messageInput.focus();
+}
+
+// Utility Functions
 function formatTime(timestamp) {
     if (!timestamp) return '';
     
     const date = new Date(timestamp);
     const now = new Date();
-    const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+    const diff = now - date;
     
-    if (diffInMinutes < 1) {
-        return 'Just now';
-    } else if (diffInMinutes < 60) {
-        return `${diffInMinutes}m ago`;
-    } else if (diffInMinutes < 1440) {
-        const hours = Math.floor(diffInMinutes / 60);
-        return `${hours}h ago`;
+    if (diff < 60000) { // Less than 1 minute
+        return 'now';
+    } else if (diff < 3600000) { // Less than 1 hour
+        return Math.floor(diff / 60000) + 'm';
+    } else if (diff < 86400000) { // Less than 1 day
+        return Math.floor(diff / 3600000) + 'h';
     } else {
-        const days = Math.floor(diffInMinutes / 1440);
-        if (days === 1) {
-            return 'Yesterday';
-        } else if (days < 7) {
-            return `${days} days ago`;
-        } else {
-            return date.toLocaleDateString();
-        }
+        return date.toLocaleDateString();
     }
 }
 
-// Close emoji picker when clicking outside
-document.addEventListener('click', function(e) {
-    const emojiPicker = document.getElementById('emojiPicker');
-    const emojiBtn = document.querySelector('.input-btn');
-    
-    if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
-        emojiPicker.style.display = 'none';
-    }
-});
+function showLoadingIndicator(show = true) {
+    document.getElementById('loadingIndicator').style.display = show ? 'flex' : 'none';
+}
 
-// Close modals when clicking outside
-document.addEventListener('click', function(e) {
-    const modal = document.getElementById('createGroupModal');
-    if (e.target === modal) {
-        closeCreateGroup();
-    }
-});
-
-// Handle window resize for responsive design
-window.addEventListener('resize', function() {
-    if (window.innerWidth > 768) {
-        document.getElementById('sidebar').style.display = 'flex';
-        document.getElementById('chatArea').style.display = 'flex';
-    }
-});
+// Make functions globally available
+window.loginUser = loginUser;
+window.signupUser = signupUser;
+window.logoutUser = logoutUser;
+window.showLoginForm = showLoginForm;
+window.showSignupForm = showSignupForm;
+window.showTab = showTab;
+window.showProfileModal = showProfileModal;
+window.showNewChatModal = showNewChatModal;
+window.showNewGroupModal = showNewGroupModal;
+window.closeModal = closeModal;
+window.updateProfile = updateProfile;
+window.createGroup = createGroup;
+window.sendMessage = sendMessage;
+window.handleMessageKeyPress = handleMessageKeyPress;
+window.searchChats = searchChats;
+window.searchUsers = searchUsers;
+window.searchGroupMembers = searchGroupMembers;
+window.toggleEmojiPicker = toggleEmojiPicker;
+window.insertEmoji = insertEmoji;
+window.toggleGroupMember = toggleGroupMember;
